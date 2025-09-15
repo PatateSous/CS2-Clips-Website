@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CS2 Clips — Autoload fixed</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#041028;--card:#071428;--muted:#9aa5b8;--accent:#10b981;--danger:#ff6b7b;--radius:12px}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#031026,#071428);color:#eaf2ff;padding:22px}
+  .container{max-width:1100px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+  h1{margin:0;font-size:20px;font-weight:800}
+  .muted{color:var(--muted);font-size:13px}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.03);box-shadow:0 8px 30px rgba(0,0,0,0.55)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  input[type="text"], input[type="url"], textarea, select{padding:8px 10px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.05);color:inherit}
+  textarea{min-height:64px;resize:vertical}
+  button.primary{background:var(--accent);color:#042017;border:none;padding:8px 12px;border-radius:999px;font-weight:700;cursor:pointer}
+  button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:8px 10px;border-radius:8px;cursor:pointer}
+  .controls{display:flex;gap:8px;align-items:center}
+  .grid{display:grid;grid-template-columns:repeat(1,1fr);gap:16px;margin-top:14px}
+  @media(min-width:640px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(min-width:980px){.grid{grid-template-columns:repeat(3,1fr)}}
+
+  .clip{position:relative;border-radius:var(--radius);overflow:hidden;background:var(--card);border:1px solid rgba(255,255,255,0.03)}
+  .titlebar{position:absolute;left:0;right:0;top:0;padding:10px 12px;background:linear-gradient(180deg,rgba(2,6,23,0.75),rgba(2,6,23,0.2));z-index:3;display:flex;align-items:center}
+  .titlebar h3{margin:0;font-size:14px;font-weight:700;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .titlebar .date{margin-left:auto;font-size:12px;color:var(--muted)}
+  .video-mid{padding-top:56.25%;position:relative;background:#000}
+  .video-mid img, .video-mid iframe{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;border:0}
+  .desc{padding:10px 12px;border-top:1px solid rgba(255,255,255,0.02);font-size:13px;color:#dfe9f8;min-height:52px}
+  .card-actions{display:flex;gap:8px;padding:10px 12px;align-items:center}
+
+  .status-row{display:flex;gap:8px;align-items:center;margin-top:10px}
+  .status{font-size:13px;color:var(--muted)}
+  .log{margin-top:10px;background:rgba(0,0,0,0.25);padding:10px;border-radius:8px;max-height:140px;overflow:auto;font-family:monospace;font-size:12px;color:#cfe7ff}
+  .danger{color:var(--danger)}
+</style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>CS2 Clips — Autoload (fixed)</h1>
+        <div class="muted">Autoload with robust fallbacks and clear diagnostics</div>
+      </div>
+      <div class="muted" id="protocolTag"></div>
+    </header>
+
+    <section class="card" aria-label="Autoload controls">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+        <div style="min-width:240px">
+          <div style="font-weight:700;margin-bottom:6px">Autoload settings</div>
+          <div class="row">
+            <label class="muted">JSON URL (optional):</label>
+            <input id="manualUrl" type="url" placeholder="Leave empty to try local files (cs2-clips.json, clips.json)">
+            <button id="tryBtn" class="ghost" title="Try autoload now">Retry autoload</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="muted">Use proxy fallback (when CORS blocks):</label>
+            <select id="proxyToggle" style="width:120px">
+              <option value="auto">Auto (try direct → proxy)</option>
+              <option value="no">No proxy</option>
+              <option value="force">Force proxy</option>
+            </select>
+
+            <label class="muted" style="margin-left:8px">On autoload:</label>
+            <select id="mergeReplace">
+              <option value="merge">Merge with existing</option>
+              <option value="replace">Replace gallery</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="min-width:240px;text-align:right">
+          <div style="margin-bottom:6px;font-size:13px">If you opened this file with <code>file://</code> the browser often blocks fetches — use the button below to pick a file or run `python -m http.server` and open <code>http://localhost:8000</code>.</div>
+          <div class="controls" style="justify-content:flex-end">
+            <button id="chooseLocalBtn" class="primary">Choose local JSON</button>
+            <button id="openServerHelp" class="ghost">How to run local server</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="status-row">
+        <div class="status" id="statusText">Status: idle</div>
+        <div id="counts" class="muted"></div>
+      </div>
+
+      <div class="log" id="diagLog" aria-live="polite"></div>
+    </section>
+
+    <section class="card" style="margin-top:12px" aria-label="Add clip">
+      <form id="addForm">
+        <div class="row">
+          <input id="videoUrl" type="url" placeholder="YouTube URL or video ID (required)" required>
+          <input id="videoTitle" type="text" placeholder="Title (required)" required>
+        </div>
+        <div style="margin-top:8px">
+          <textarea id="videoDesc" placeholder="Short description (optional)"></textarea>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;gap:12px">
+          <div class="controls">
+            <button class="primary" type="submit">Add clip</button>
+            <button id="clearAll" type="button" class="ghost">Clear all</button>
+          </div>
+
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="searchInput" type="text" placeholder="Search title or description..." style="min-width:220px;padding:8px 10px;border-radius:8px;">
+            <button id="exportBtn" type="button" class="ghost">Download JSON</button>
+            <button id="copyBtn" type="button" class="ghost">Copy JSON</button>
+            <button id="importBtn" type="button" class="ghost">Import JSON</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <main id="gallery" class="grid" aria-live="polite" style="margin-top:12px"></main>
+
+    <footer style="margin-top:12px" class="muted">Tip: Put <code>cs2-clips.json</code> next to the HTML and serve the folder (recommended). If you prefer I can create a version that auto-uploads to pastebin/gist.</footer>
+  </div>
+
+  <input type="file" id="jsonFile" accept="application/json" style="display:none">
+
+<script>
+/* ---------- Utilities & state ---------- */
+const LS_KEY = 'cs2_clips_permanent_v1';
+const gallery = document.getElementById('gallery');
+const diagLog = document.getElementById('diagLog');
+const statusText = document.getElementById('statusText');
+const countsEl = document.getElementById('counts');
+const protocolTag = document.getElementById('protocolTag');
+
+let clips = loadClips();
+
+// small logger visible on page
+function log(msg){ console.log(msg); diagLog.textContent += (new Date()).toLocaleTimeString() + ' — ' + msg + '\\n'; diagLog.scrollTop = diagLog.scrollHeight; }
+function setStatus(text){ statusText.textContent = 'Status: ' + text; log(text); }
+function saveClips(list){ localStorage.setItem(LS_KEY, JSON.stringify(list)) }
+function loadClips(){ try { return JSON.parse(localStorage.getItem(LS_KEY)) || [] } catch(e){ return [] } }
+function nowIso(){ return new Date().toISOString() }
+function youtubeIdFrom(input){
+  if(!input) return null;
+  input = input.trim();
+  if(/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
+  try{
+    const u = new URL(input);
+    if(u.hostname.includes('youtu.be')) return u.pathname.slice(1).split('?')[0];
+    if(u.hostname.includes('youtube.com')){
+      const v = u.searchParams.get('v');
+      if(v) return v;
+      const parts = u.pathname.split('/').filter(Boolean);
+      if(parts[0] === 'shorts' && parts[1]) return parts[1];
+    }
+  }catch(e){}
+  const m = input.match(/v=([a-zA-Z0-9_-]{11})/);
+  if(m) return m[1];
+  const mm = input.match(/([a-zA-Z0-9_-]{11})/);
+  return mm ? mm[1] : null;
+}
+function thumbUrl(id){ return `https://img.youtube.com/vi/${id}/hqdefault.jpg` }
+function embedUrl(id){ return `https://www.youtube.com/embed/${id}` }
+
+/* ---------- Render ---------- */
+function renderGallery(filterText = ''){
+  gallery.innerHTML = '';
+  const f = (filterText || '').toLowerCase().trim();
+  const filtered = clips.filter(c => {
+    if(!f) return true;
+    return (c.title || '').toLowerCase().includes(f) || (c.description || '').toLowerCase().includes(f);
+  });
+
+  countsEl.textContent = `Showing ${filtered.length} / ${clips.length}`;
+
+  if(filtered.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'card';
+    empty.style.gridColumn = '1 / -1';
+    empty.innerHTML = '<div style="padding:18px;text-align:center;color:var(--muted)">No clips — add some or import a JSON file.</div>';
+    gallery.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach(clip => {
+    const el = document.createElement('article');
+    el.className = 'clip';
+    el.innerHTML = `
+      <div class="titlebar"><h3 title="${escapeHtml(clip.title)}">${escapeHtml(clip.title)}</h3><div class="date">${new Date(clip.addedAt).toLocaleDateString()}</div></div>
+      <div class="video-mid" data-id="${clip.id}"><img src="${thumbUrl(clip.id)}" alt="${escapeHtml(clip.title)}" loading="lazy"></div>
+      <div class="desc">${escapeHtml(clip.description || '')}</div>
+      <div class="card-actions">
+        <button class="ghost" data-load="${clip.id}">Load video</button>
+        <a class="muted" href="https://youtu.be/${clip.id}" target="_blank" rel="noreferrer">Open on YouTube</a>
+        <button class="danger" data-remove="${clip.id}" title="Remove clip">Remove</button>
+      </div>`;
+    gallery.appendChild(el);
+  });
+}
+function escapeHtml(s){ return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
+/* ---------- Add / Remove / Load ---------- */
+document.getElementById('addForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const url = document.getElementById('videoUrl').value.trim();
+  const title = document.getElementById('videoTitle').value.trim();
+  const desc = document.getElementById('videoDesc').value.trim();
+  const id = youtubeIdFrom(url);
+  if(!id){ alert('Enter valid YouTube URL or 11-char video ID'); return; }
+  if(!title){ alert('Please add a title'); return; }
+  if(clips.some(c=>c.id===id)){
+    if(!confirm('This video is already present. Add duplicate anyway?')) return;
+  }
+  const item = { id, title, description: desc || '', addedAt: nowIso() };
+  clips.unshift(item); saveClips(clips); renderGallery(document.getElementById('searchInput').value);
+  document.getElementById('videoUrl').value=''; document.getElementById('videoTitle').value=''; document.getElementById('videoDesc').value='';
+});
+
+gallery.addEventListener('click', e=>{
+  const loadId = e.target.closest('[data-load]')?.getAttribute('data-load');
+  if(loadId){ const wrapper = e.target.closest('.clip').querySelector('.video-mid'); wrapper.innerHTML = `<iframe src="${embedUrl(loadId)}" allow="autoplay; encrypted-media" allowfullscreen loading="lazy"></iframe>`; return; }
+  const removeId = e.target.closest('[data-remove]')?.getAttribute('data-remove');
+  if(removeId){ if(confirm('Remove this clip?')){ clips = clips.filter(c=>c.id!==removeId); saveClips(clips); renderGallery(document.getElementById('searchInput').value); } }
+});
+
+/* ---------- Search / Export / Import ---------- */
+document.getElementById('searchInput').addEventListener('input', e => renderGallery(e.target.value));
+document.getElementById('exportBtn').addEventListener('click', ()=>{
+  const data = JSON.stringify(clips, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'cs2-clips.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+});
+document.getElementById('copyBtn').addEventListener('click', async ()=>{
+  try{ await navigator.clipboard.writeText(JSON.stringify(clips, null, 2)); alert('JSON copied to clipboard'); } catch(err){ alert('Copy failed: ' + err); }
+});
+document.getElementById('importBtn').addEventListener('click', ()=> {
+  const input = document.getElementById('jsonFile');
+  input.onchange = async ev=>{
+    const f = ev.target.files[0]; if(!f) return;
+    try{
+      const txt = await f.text();
+      const json = JSON.parse(txt);
+      if(!Array.isArray(json)) throw new Error('JSON must be an array of clip objects');
+      const existing = new Set(clips.map(c=>c.id));
+      const toAdd = [];
+      for(const item of json){
+        const id = item.id || youtubeIdFrom(item.url || item.link || '');
+        if(!id) continue;
+        if(existing.has(id)) continue;
+        toAdd.push({ id, title: item.title || item.name || `Clip ${id}`, description: item.description || item.desc || '', addedAt: item.addedAt || nowIso() });
+        existing.add(id);
+      }
+      if(toAdd.length===0) return alert('No new clips to import (duplicates ignored).');
+      clips = toAdd.concat(clips); saveClips(clips); renderGallery(document.getElementById('searchInput').value); alert(`Imported ${toAdd.length} clips`);
+    } catch(err){ alert('Import failed: ' + (err.message||err)); }
+    input.value = '';
+  };
+  input.click();
+});
+
+/* ---------- Clear All ---------- */
+document.getElementById('clearAll').addEventListener('click', ()=>{
+  if(confirm('Clear gallery? This cannot be undone.')){ clips = []; saveClips(clips); renderGallery(); }
+});
+
+/* ---------- Autoload helpers ---------- */
+async function tryFetchJson(url, useProxyIfFail = true){
+  setStatus(`Fetching ${url} ...`);
+  log('Attempting fetch: ' + url);
+  try{
+    const res = await fetch(url, {cache:'no-store'});
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    const json = JSON.parse(text);
+    log('Direct fetch OK: ' + url);
+    return json;
+  }catch(err){
+    log('Direct fetch failed: ' + (err.message || err));
+    if(!useProxyIfFail) throw err;
+    // Try proxy fallback
+    const proxy = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+    setStatus('Direct fetch failed; trying proxy...');
+    try{
+      const r2 = await fetch(proxy);
+      if(!r2.ok) throw new Error('Proxy HTTP ' + r2.status);
+      const t2 = await r2.text();
+      const j2 = JSON.parse(t2);
+      log('Proxy fetch OK: ' + proxy);
+      return j2;
+    }catch(err2){
+      log('Proxy fetch failed: ' + (err2.message || err2));
+      throw err2;
+    }
+  }
+}
+
+/* normalize and merge/replace results */
+function integrateJson(jsonArr, mode='merge'){
+  if(!Array.isArray(jsonArr) && jsonArr && Array.isArray(jsonArr.items)) jsonArr = jsonArr.items;
+  if(!Array.isArray(jsonArr)) throw new Error('Expected JSON array of clips (or { items: [...] })');
+  const normalized = [];
+  for(const item of jsonArr){
+    const id = item.id || item.videoId || youtubeIdFrom(item.url || item.link || item.videoUrl || '');
+    if(!id) continue;
+    normalized.push({
+      id,
+      title: item.title || item.name || (item.snippet && item.snippet.title) || `Clip ${id}`,
+      description: item.description || item.summary || (item.snippet && item.snippet.description) || '',
+      addedAt: item.addedAt || nowIso()
+    });
+  }
+  if(normalized.length === 0) throw new Error('No valid clip entries found in JSON');
+  if(mode === 'replace'){ clips = normalized; }
+  else {
+    const existing = new Set(clips.map(c=>c.id));
+    const toAdd = normalized.filter(n => !existing.has(n.id));
+    clips = toAdd.concat(clips);
+  }
+  saveClips(clips);
+  renderGallery();
+  return normalized.length;
+}
+
+/* ---------- Autoload flow ---------- */
+async function autoloadFlow(opts = {}){
+  // opts: urlOverride, proxy ('auto'|'no'|'force'), mode('merge'|'replace')
+  const urlParam = opts.urlOverride || (new URLSearchParams(location.search)).get('json') || '';
+  const proxyPref = opts.proxy || document.getElementById('proxyToggle').value;
+  const mode = opts.mode || document.getElementById('mergeReplace').value;
+  const useProxyIfFail = (proxyPref === 'auto' || proxyPref === 'force');
+  const forceProxy = (proxyPref === 'force');
+
+  setStatus('Starting autoload...');
+  log('Autoload start. ProxyPref=' + proxyPref + ', mode=' + mode + ', urlParam=' + urlParam);
+
+  // If page is file://, we can't reliably fetch relative files — prompt user to pick local file instead
+  if(location.protocol === 'file:'){
+    setStatus('file:// detected — browser blocks relative fetch. Please choose a local JSON file.');
+    log('Protocol file:// — prompting user to pick local file');
+    return; // do not auto-open file dialog to avoid user-gesture restriction; user can click Choose local JSON
+  }
+
+  // Build candidate URLs
+  const candidates = [];
+  if(urlParam) candidates.push(urlParam);
+  // relative candidates (same folder) only if no explicit url
+  if(!urlParam){
+    candidates.push('cs2-clips.json', 'clips.json', 'cs2-clips-permanent.json', './cs2-clips.json');
+  }
+
+  let anyAdded = 0;
+  for(const cand of candidates){
+    try{
+      const useProxy = forceProxy ? true : useProxyIfFail;
+      const json = await tryFetchJson(cand, useProxy);
+      const count = integrateJson(json, mode);
+      setStatus(`Autoload: imported ${count} items from ${cand}`);
+      anyAdded += count;
+      log(`Imported ${count} items from ${cand}`);
+      // stop after first successful import
+      return;
+    }catch(err){
+      log(`Autoload candidate failed: ${cand} — ${err.message || err}`);
+      // try next
+      continue;
+    }
+  }
+
+  setStatus('Autoload: no JSON loaded (see log). Try Choose local JSON or enter a URL and Retry.');
+}
+
+/* ---------- UI wiring for autoload controls ---------- */
+document.getElementById('tryBtn').addEventListener('click', ()=> {
+  const mUrl = document.getElementById('manualUrl').value.trim() || null;
+  autoloadFlow({ urlOverride: mUrl, proxy: document.getElementById('proxyToggle').value, mode: document.getElementById('mergeReplace').value })
+    .catch(e => { log('Autoload error: ' + (e.message||e)); setStatus('Autoload failed — see log'); });
+});
+
+// Choose local file (works on file:// and http(s))
+document.getElementById('chooseLocalBtn').addEventListener('click', ()=> {
+  const input = document.getElementById('jsonFile');
+  input.onchange = async e=>{
+    const f = e.target.files[0];
+    if(!f) return;
+    try{
+      setStatus('Reading local file: ' + f.name);
+      const t = await f.text();
+      const json = JSON.parse(t);
+      const mode = document.getElementById('mergeReplace').value;
+      const added = integrateJson(json, mode);
+      alert('Imported local file — ' + added + ' clips added (mode: ' + mode + ')');
+      setStatus('Imported local file: ' + f.name);
+    }catch(err){
+      alert('Failed to read/parse JSON: ' + (err.message||err));
+      setStatus('Local file parse error');
+      log('Local parse error: ' + (err.message||err));
+    } finally { input.value = ''; }
+  };
+  input.click();
+});
+
+// Help: run local server
+document.getElementById('openServerHelp').addEventListener('click', ()=> {
+  alert('To serve files locally: open a terminal in the folder containing the HTML and JSON and run:\\n\\npython -m http.server 8000\\n\\nThen open: http://localhost:8000/ in your browser. This avoids file:// CORS issues.');
+});
+
+/* ---------- Init ---------- */
+protocolTag.textContent = `protocol: ${location.protocol}`;
+renderGallery();
+log('Initial clips loaded from localStorage: ' + clips.length + ' items');
+
+// Attempt autoload automatically after a tiny delay (so UI paints first)
+setTimeout(()=> {
+  if(location.protocol === 'file:'){
+    setStatus('file:// detected — choose local JSON or run a local server. Autoload skipped.');
+    log('Skipped autoload due to file:// (use Choose local JSON or start server).');
+  } else {
+    document.getElementById('tryBtn').click(); // triggers autoload using default settings
+  }
+}, 300);
+
+</script>
+</body>
+</html>
